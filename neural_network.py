@@ -1,9 +1,6 @@
-
-# linearly separable boolean function = a and b and c and d and e and f and g and h
-# non-linearly separable boolean function = a xor b xor c xor d xor e xor f xor g xor h
-
-import numpy as np
 import math
+import matplotlib.pyplot as plt
+import numpy as np
 
 class NeuralNetwork():
 
@@ -31,6 +28,12 @@ class NeuralNetwork():
     MOMENTUM = 1
     NESTEROV_MOMENTUM = 2
 
+    # Monitoring flags
+    PRINT_LOSS = 0
+    PRINT_VAL_LOSS = 1
+    GRAPH_LOSS = 2
+    GRAPH_VAL_LOSS = 3
+
     def __init__(self, layer_sizes,
                  activation=RELU,
                  loss=CROSS_ENTROPY,
@@ -41,8 +44,7 @@ class NeuralNetwork():
                  learning_rate_epochs_per_decay=500,
                  param_update_method=NESTEROV_MOMENTUM,
                  momentum=0.9, momentum_build=0,
-                 momentum_epochs_per_build=500
-                 ):
+                 momentum_epochs_per_build=500):
 
         # Matrices containing weights between neural network layers
         self.W = []
@@ -104,10 +106,10 @@ class NeuralNetwork():
 
         # Node activation function and its derivative
         if activation == NeuralNetwork.RELU:
-            self.activation = NeuralNetwork._relu
-            self.d_activation = NeuralNetwork._d_relu
+            self.activation = self._relu
+            self.d_activation = self._d_relu
         elif activation == NeuralNetwork.SIGMOID:
-            self.activation = lambda x: self._sigmoid(x, True)
+            self.activation = self._sigmoid
             self.d_activation = self._d_sigmoid
         elif activation == NeuralNetwork.TANH:
             self.activation = self._tanh
@@ -132,30 +134,25 @@ class NeuralNetwork():
               learning_task != NeuralNetwork.ATTRIBUTE_CLASSIFICATION):
             raise ValueError('Invalid learning task')
 
-        # Loss function and its derivative
+        # Loss function
         self.loss = loss
         if learning_task == NeuralNetwork.CLASSIFICATION:
             if loss == NeuralNetwork.CROSS_ENTROPY:
                 self.data_loss = self._cross_entropy_loss
-                self.d_data_loss = self._d_cross_entropy_loss
             elif loss == NeuralNetwork.HINGE:
                 self.data_loss = self._hinge_loss
-                self.d_data_loss = self._d_hinge_loss
             else:
                 raise ValueError('Invalid loss function')
         elif learning_task == NeuralNetwork.ATTRIBUTE_CLASSIFICATION:
             if loss == NeuralNetwork.CROSS_ENTROPY:
                 self.data_loss = self._cross_entropy_loss_attr
-                self.d_data_loss = self._d_cross_entropy_loss_attr
             elif loss == NeuralNetwork.HINGE:
                 self.data_loss = self._hinge_loss_attr
-                self.d_data_loss = self._d_hinge_loss_attr
             else:
                 raise ValueError('Invalid loss function')
         elif learning_task == NeuralNetwork.REGRESSION:
             if loss == NeuralNetwork.SQUARED_ERROR:
                 self.data_loss = self._squared_error_loss
-                self.d_data_loss = self._d_squared_error_loss
             else:
                 raise ValueError('Invalid loss function')
 
@@ -210,10 +207,39 @@ class NeuralNetwork():
     #   eg. y[3] = [0.49] means the 4th training instance is associated with the
     #   real value 0.49
     #
-    # Please ensure that y is signed
+    # Please ensure that X and y are signed
     def train(self, X, y, epochs=1000, batch_size=None,
-              val_X=None, val_y=None):
+              val_X=None, val_y=None, monitoring_flags=[],
+              monitoring_resolution=100):
         num_instances = X.shape[0]
+
+        graph_loss = NeuralNetwork.GRAPH_LOSS in monitoring_flags
+        graph_val_loss = NeuralNetwork.GRAPH_VAL_LOSS in monitoring_flags
+        print_loss = NeuralNetwork.PRINT_LOSS in monitoring_flags
+        print_val_loss = NeuralNetwork.PRINT_VAL_LOSS in monitoring_flags
+
+        loss_plotline = None
+        val_loss_plotline = None
+
+        if ((graph_val_loss or print_val_loss) and
+           (val_X is None or val_y is None)):
+            raise ValueError('Attempting to monitor validation loss with no '
+                             'validation instances')
+
+        if graph_loss:
+            loss_plotline,  = plt.plot([], [], 'r-', label='Training loss')
+        if graph_val_loss:
+            val_loss_plotline, = plt.plot([], [], 'b-', label='Validation loss')
+
+        if graph_loss or graph_val_loss:
+            plt.ion()
+            plt.xlim([0, epochs])
+            plt.title("Loss per Epoch")
+            plt.xlabel("Epoch")
+            plt.ylabel("Loss")
+            plt.legend()
+            plt.grid()
+            plt.show()
 
         if (self.learning_task == NeuralNetwork.ATTRIBUTE_CLASSIFICATION and
                      self.loss == NeuralNetwork.HINGE):
@@ -249,27 +275,53 @@ class NeuralNetwork():
                     y_batch = y[sample]
 
                 # Feed through network to calculate scores
-                scores = self._calculate_scores(X_batch, y_batch,
-                                                dropout_prob=self.dropout_prob,
-                                                cache_results=True)
+                scores, last_layer_output = self._calculate_scores(
+                        X_batch,
+                        dropout_prob=self.dropout_prob,
+                        cache_results=True
+                )
                 loss, dscores = self._loss(scores, y_batch)
 
-                if val_X:
+                val_loss = None
+                if print_val_loss or graph_val_loss:
                     # Calculate the validation set loss
-                    val_scores = self._calculate_scores(
-                            val_X, val_y,
-                            dropout_prob=self.dropout_prob
-                    )
+                    val_scores, _ = self._calculate_scores(val_X)
                     val_loss, _ = self._loss(val_scores, val_y)
 
+                if epoch % (epochs//monitoring_resolution) == 0:
+                    # Print and graph loss and validation loss
+                    if print_loss:
+                        print('Training loss for epoch %d, batch %d: %g' % (
+                                epoch, batch, loss))
+                    if print_val_loss:
+                        print('Validation loss for epoch %d, batch %d: %g' % (
+                                epoch, batch, val_loss))
 
+                    if graph_loss:
+                        loss_plotline.set_xdata(
+                            np.append(loss_plotline.get_xdata(), epoch)
+                        )
+                        loss_plotline.set_ydata(
+                            np.append(loss_plotline.get_ydata(), loss)
+                        )
 
-                print('loss for epoch %d, batch %d: %g' % (epoch, batch, loss))
+                    if graph_val_loss:
+                        val_loss_plotline.set_xdata(
+                            np.append(val_loss_plotline.get_xdata(), epoch)
+                        )
+                        val_loss_plotline.set_ydata(
+                            np.append(val_loss_plotline.get_ydata(), val_loss)
+                        )
+
+                    if graph_loss or graph_val_loss:
+                        ax = plt.gca()
+                        ax.relim()
+                        ax.autoscale_view()
+                        plt.draw()
+                        plt.pause(0.00000001)
 
                 # Back propagate from the output layer
-                dscores = self.d_data_loss(scores, y_batch)
-
-                dWoutput = np.dot(layer_output.T, dscores)
+                dWoutput = np.dot(last_layer_output.T, dscores)
                 dWoutput += self.d_reg_loss(self.W[-1])
                 dboutput = np.sum(dscores, axis=0, keepdims=True)
 
@@ -300,11 +352,16 @@ class NeuralNetwork():
                 # Update weights
                 self._update_weights()
 
+        if graph_loss or graph_val_loss:
+            plt.ioff()
+            plt.show()
 
-    def _calculate_scores(self, X, y, dropout_prob=1, cache_results=False):
+
+    # Feeds forward through the network to calculate the scores for some input
+    def _calculate_scores(self, X, dropout_prob=1, cache_results=False):
         self._current_layer = 0
         # Feed through hidden layers
-        layer_output = X_batch
+        layer_output = X
         for W, b in zip(self.W[:-1], self.b[:-1]):
             layer_input = layer_output
 
@@ -326,8 +383,7 @@ class NeuralNetwork():
 
         # Feed forward through the output layer
         scores = np.dot(layer_output, self.W[-1]) + self.b[-1]
-        loss = self._loss(scores, y_batch, cache_results)
-        return loss
+        return scores, layer_output
 
 
     # Updates weights with gradients calculated in training
@@ -392,10 +448,7 @@ class NeuralNetwork():
     #   eg. prediction[3] = 0.49 indicates that the real value associated with
     #   the 4th test instance is predicted to be 0.49
     def predict(self, X):
-        for W, b in zip(self.W[:-1], self.b[:-1]):
-            X = self.activation(np.dot(X, W) + b)
-
-        scores = np.dot(X, self.W[-1]) + self.b[-1]
+        scores, _ = self._calculate_scores(X)
 
         prediction = None
 
@@ -422,7 +475,7 @@ class NeuralNetwork():
         return loss, dscores
 
 
-    # The cross-entropy loss function
+    # The cross-entropy loss function, also calculates dloss/dscores
     def _cross_entropy_loss(self, S, y):
         probs = np.exp(S)/np.sum(np.exp(S), axis=1, keepdims=True)
 
@@ -435,97 +488,38 @@ class NeuralNetwork():
         return result, probs/num_instances
 
 
-    # Derivative of the cross-entropy loss function
-    def _d_cross_entropy_loss(self, S, y):
-        # Assumes that the cross-entropy function was previously called on this
-        # layer in the forward pass of this epoch
-        probs = self._curr_cache['cross_entropy_loss_probs']
-
-        num_instances = probs.shape[0]
-        probs[range(num_instances), y] -= 1
-        return probs/num_instances
-
-
     # The cross-entropy loss function when doing attribute classification
+    # Also calculates dloss/dscores
     def _cross_entropy_loss_attr(self, S, y):
         sig = self._sigmoid(S)
-
-        # Save this matrix as it is used during back propagation
-        self._curr_cache['cross_entropy_loss_attr_sig'] = sig
-
         probs = y*np.log(sig) + (1 - y)*np.log(1 - sig)
-        return np.sum(-probs, axis=1)
-
-    # The derivative of the cross-entropy loss function when doing attribute
-    # classification
-    def _d_cross_entropy_loss_attr(self, S, y):
-        # Assumes that the cross-entropy function was previously called on this
-        # layer in the forward pass of this epoch
-        sig = self._curr_cache['cross_entropy_loss_attr_sig']
-
-        return -y + sig
+        return np.sum(-probs, axis=1), -y + sig
 
 
-    # The hinge loss function
+    # The hinge loss function, also calculates dloss/dscores
     def _hinge_loss(self, S, y):
         num_instances = S.shape[0]
         margins = np.maximum(0,
             S - S[range(num_instances), y].reshape(num_instances, 1) + 1)
         margins[range(margins.shape[0]),y] = 0
 
-        # Save this matrix as it is used during back propagation
-        self._curr_cache['hinge_loss_margins'] = margins
-
-        return np.sum(margins, axis=1)
-
-
-    # The derivative of the hinge loss function
-    def _d_hinge_loss(self, S, y):
-        # Assumes that the hinge loss function was previously called on this
-        # layer in the forward pass of this epoch
-        margins = self._curr_cache['hinge_loss_margins']
-
         dS = np.sign(margins)
         dS[range(dS.shape[0]), y] = -np.sum(dS, axis=1)
-        return dS
+
+        return np.sum(margins, axis=1), dS
 
 
     # The hinge loss function when doing attribute classification
+    # Also calculates dloss/dscores
     def _hinge_loss_attr(self, S, y):
         margins = np.maximum(0, 1 - S*y)
-
-        # Save this matrix as it is used during back propagation
-        self._curr_cache['hinge_loss_attr_margins'] = margins
-
-        return np.sum(margins, axis=1)
+        return np.sum(margins, axis=1), -y * np.sign(margins)
 
 
-    # The derivative of the hinge loss function when doing attribute
-    # classification
-    def _d_hinge_loss_attr(self, S, y):
-        # Assumes that the hinge loss function was previously called on this
-        # layer in the forward pass of this epoch
-        margins = self._curr_cache['hinge_loss_attr_margins']
-
-        return -y * np.sign(margins)
-
-
-    # The squared error loss function
+    # The squared error loss function, also calculates dloss/dscores
     def _squared_error_loss(self, S, y):
         diffs = S - y.reshape(y.shape[0], 1)
-
-        # Save this matrix as it is used during back propagation
-        self._curr_cache['squared_error_loss_diff'] = diffs
-
-        return np.sum(diffs**2, axis=1)**2
-
-
-    def _d_squared_error_loss(self, S, y):
-        # Assumes that the squared error loss function was previously called on
-        # this layer in the forward pass of this epoch
-        diffs = self._curr_cache['squared_error_loss_diff']
-
-        return 2*diffs
+        return np.sum(diffs**2, axis=1)**2, 2*diffs
 
 
     # The L2 regularization function
@@ -549,9 +543,9 @@ class NeuralNetwork():
 
 
     # The sigmoid activation function
-    def _sigmoid(self, X, cache_results=True):
+    def _sigmoid(self, X, cache_results=False):
         result = 1/(1 + np.exp(-X))
-        if save_result:
+        if cache_results:
             # Save this result as it is used during back propagation
             self._curr_cache['sigmoid_result'] = result
         return result
@@ -567,10 +561,11 @@ class NeuralNetwork():
 
 
     # The tanh activation function
-    def _tanh(self, X):
+    def _tanh(self, X, cache_results=False):
         result = np.tanh(X)
-        # Save this result as it is used during back propagation
-        self._curr_cache['tanh_result'] = result
+        if cache_results:
+            # Save this result as it is used during back propagation
+            self._curr_cache['tanh_result'] = result
         return result
 
 
@@ -584,12 +579,12 @@ class NeuralNetwork():
 
 
     # The relu activation function
-    def _relu(X):
+    def _relu(self, X, cache_results=False):
         return np.maximum(0, X)
 
 
     # The derivative of the relu activation function
-    def _d_relu(X):
+    def _d_relu(self, X):
         result = X.copy()
         result[result <= 0] = 0
         result[result > 0] = 1
@@ -597,77 +592,180 @@ class NeuralNetwork():
 
 
 
+#####
+# This section tests the implementation on a few example data sets
+#####
+
 import itertools
 
-'''
-INPUTS = 8
-INSTANCES = 2**INPUTS
-CLASSES = 2
+autompg_data = []
+discrete_attribute_values = {
+    0 : [3, 4, 5, 6, 8],
+    5 : [70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82],
+    6 : [1, 2, 3]
+}
 
-X = np.zeros((INSTANCES,INPUTS), dtype='int8')
-y = np.zeros((INSTANCES, CLASSES), dtype='int8')
+# Training on autoMpg
+with open('autoMpgData.csv') as f:
+    for line in f:
+        if '?' in line:
+            # Skip instances with missing attributes
+            continue
+        attributes = list(map(float, line.strip().split(',')))
+        autompg_data.append(attributes)
 
-for i, product in enumerate(itertools.product('01', repeat=INPUTS)):
+autompg_num_inputs = len(autompg_data[0]) - 1 - len(discrete_attribute_values) + sum(map(len, discrete_attribute_values.values()))
+autompg_num_instances = len(autompg_data)
+autompg_test_split = 0.1
+autompg_num_test_instances = int(autompg_num_instances*autompg_test_split)
+autompg_validation_split = 0.1
+autompg_num_validation_instances = int((autompg_num_instances-autompg_num_test_instances)*autompg_validation_split)
+
+# Gather the data
+X = np.zeros((autompg_num_instances, autompg_num_inputs))
+y = np.zeros(autompg_num_instances)
+for i, instance in enumerate(autompg_data):
+    converted_attributes = []
+
+    # Convert class attributes into indicator attributes
+    for j, attribute in enumerate(instance):
+        if j in discrete_attribute_values:
+            attribute = int(attribute)
+            converted_attributes += [int(x == attribute) for x in discrete_attribute_values[j]]
+        else:
+            converted_attributes.append(attribute)
+
+    print(converted_attributes)
+    X[i] = converted_attributes[:-1]
+    y[i] = converted_attributes[-1]
+
+# Zero-center data
+X -= np.mean(X, axis=0)
+# Normalize data
+X /= np.std(X, axis=0)
+
+# Split into train, validation and test instances
+indices = np.random.permutation(autompg_num_instances)
+test_indices = indices[:autompg_num_test_instances]
+rest_indices = indices[autompg_num_test_instances:]
+validation_indices = rest_indices[:autompg_num_validation_instances]
+train_indices = rest_indices[autompg_num_validation_instances:]
+train_X, val_X, test_X = X[train_indices,:], X[validation_indices,:], X[test_indices,:]
+train_y, val_y, test_y = y[train_indices], y[validation_indices], y[test_indices]
+
+# Train a linear regression
+nnet = NeuralNetwork(layer_sizes=[autompg_num_inputs, 1],
+                     dropout_prob=1,
+                     loss=NeuralNetwork.SQUARED_ERROR,
+                     learning_task=NeuralNetwork.REGRESSION,
+                     reg_strength=0.01,
+                     learning_rate=0.0000001,
+                     learning_rate_decay=0.0,
+                     learning_rate_epochs_per_decay=500)
+
+nnet.train(train_X, train_y, 10000,
+           monitoring_flags=[NeuralNetwork.PRINT_LOSS,
+                             NeuralNetwork.GRAPH_LOSS,
+                             NeuralNetwork.PRINT_VAL_LOSS,
+                             NeuralNetwork.GRAPH_VAL_LOSS],
+           val_X=val_X, val_y=val_y)
+
+# Calculate the error on the test data
+squared_error = 0
+predictions = nnet.predict(test_X)
+for i in range(predictions.shape[0]):
+    #print('Prediction for x=%s: y=%f (should be %f)' % (test_X[i], predictions[i], test_y[i]))
+    squared_error += (predictions[i] - test_y[i])**2
+
+print('Average squared error: %f' % (squared_error/autompg_num_test_instances))
+
+# Train a neural net
+nnet = NeuralNetwork(layer_sizes=[autompg_num_inputs, 100, 1],
+                     dropout_prob=1,
+                     loss=NeuralNetwork.SQUARED_ERROR,
+                     learning_task=NeuralNetwork.REGRESSION,
+                     reg_strength=0.001,
+                     learning_rate=0.00000001,
+                     learning_rate_decay=0.0,
+                     learning_rate_epochs_per_decay=500)
+
+nnet.train(train_X, train_y, 10000,
+           monitoring_flags=[NeuralNetwork.PRINT_LOSS,
+                             NeuralNetwork.GRAPH_LOSS,
+                             NeuralNetwork.PRINT_VAL_LOSS,
+                             NeuralNetwork.GRAPH_VAL_LOSS],
+           val_X=val_X, val_y=val_y)
+
+# Calculate the error on the test data
+squared_error = 0
+predictions = nnet.predict(test_X)
+for i in range(predictions.shape[0]):
+    #print('Prediction for x=%s: y=%f (should be %f)' % (test_X[i], predictions[i], test_y[i]))
+    squared_error += (predictions[i] - test_y[i])**2
+
+print('Average squared error: %f' % (squared_error/autompg_num_test_instances))
+
+
+# Training on binary function
+binary_num_inputs = 8
+binary_num_instances = 2**binary_num_inputs
+binary_num_classes = 2
+
+X = np.zeros((binary_num_instances, binary_num_inputs), dtype='int8')
+y = np.zeros(binary_num_instances, dtype='int8')
+
+for i, product in enumerate(itertools.product('01', repeat=binary_num_inputs)):
     for j, bit in enumerate(product):
         X[i, j] = int(bit)
     #y[i] = X[i, 0] & X[i, 1] & X[i, 2] & X[i, 3] & X[i, 4] & X[i, 5] & X[i, 6] & X[i, 7]
-    y[i][X[i, 0] ^ X[i, 1] ^ X[i, 2] ^ X[i, 3] ^ X[i, 4] ^ X[i, 5] ^ X[i, 6] ^ X[i, 7]] = 1
-print(X)
-print(y)
+    y[i] = X[i, 0] ^ X[i, 1] ^ X[i, 2] ^ X[i, 3] ^ X[i, 4] ^ X[i, 5] ^ X[i, 6] ^ X[i, 7]
 
-print(X[3], y[3])
+# Train a linear classifier
+nnet = NeuralNetwork(layer_sizes=[binary_num_inputs, binary_num_classes],
+                     dropout_prob=1,
+                     loss=NeuralNetwork.HINGE,
+                     learning_task=NeuralNetwork.CLASSIFICATION,
+                     reg_strength=0,
+                     learning_rate=0.000001,
+                     learning_rate_decay=0.0,
+                     learning_rate_epochs_per_decay=500)
 
-nnet = NeuralNetwork(layer_sizes=[8, 100, 2], loss=NeuralNetwork.CROSS_ENTROPY, learning_task=NeuralNetwork.ATTRIBUTE_CLASSIFICATION, reg_strength=0.000, learning_rate=0.001, learning_rate_decay=0.0, learning_rate_epochs_per_decay=500)
-'''
+nnet.train(X, y, 10000,
+           monitoring_flags=[NeuralNetwork.PRINT_LOSS,
+                             NeuralNetwork.GRAPH_LOSS,])
 
-'''
-INPUTS = 3
-INSTANCES = 2**INPUTS
-
-X = np.zeros((INSTANCES,INPUTS), dtype='uint8')
-y = np.zeros(INSTANCES, dtype='uint8')
-
-for i, product in enumerate(itertools.product('01', repeat=INPUTS)):
-    for j, bit in enumerate(product):
-        X[i, j] = int(bit)
-    y[i] = X[i, 0] ^ X[i, 1] ^ X[i, 2]
-print(X)
-print(y)
-
-print(X[3], y[3])
-
-nnet = NeuralNetwork(layer_sizes=[3, 200, 2], reg_strength=0, learning_rate=0.1, activation='relu')
-'''
-
-import random
-
-INPUTS = 2
-INSTANCES = 500
-
-X = np.zeros((INSTANCES,INPUTS), dtype='uint8')
-y = np.zeros(INSTANCES, dtype='uint8')
-
-for i in range(INSTANCES):
-    X[i, 0] = random.randint(0, 10)
-    X[i, 1] = random.randint(0, 10)
-    y[i] = X[i, 0] + X[i, 1]
-print(X)
-print(y)
-
-print(X[3], y[3])
-
-nnet = NeuralNetwork(layer_sizes=[2, 100, 1], param_update_method=NeuralNetwork.MOMENTUM, learning_task=NeuralNetwork.REGRESSION, reg_strength=0, learning_rate=0.000001, activation=NeuralNetwork.RELU, learning_rate_decay=0.1, learning_rate_epochs_per_decay=2000)
-
-nnet.predict(X)
-
-nnet.train(X, y, 5000)
-
+# Get predictions for every possible input
 correct_predictions = 0
 predictions = nnet.predict(X)
 for i in range(predictions.shape[0]):
     if predictions[i] == y[i]:
         correct_predictions += 1
     else:
-        print('incorrect prediction: x=%s, y=%f (should be %d)' % (X[i], predictions[i], y[i]))
+        print('Incorrect prediction: x=%s, y=%d (should be %d)' % (X[i], predictions[i], y[i]))
 
-print('Correctly predicting %d%% of instances' % (correct_predictions*100/y.shape[0]))
+print('Correctly predicting %d%% of instances' % (correct_predictions*100/binary_num_instances))
+
+# Train a neural net classifier
+nnet = NeuralNetwork(layer_sizes=[binary_num_inputs, 100, binary_num_classes],
+                     dropout_prob=1,
+                     loss=NeuralNetwork.HINGE,
+                     learning_task=NeuralNetwork.CLASSIFICATION,
+                     reg_strength=0,
+                     learning_rate=0.0001,
+                     learning_rate_decay=0.0,
+                     learning_rate_epochs_per_decay=500)
+
+nnet.train(X, y, 2000,
+           monitoring_flags=[NeuralNetwork.PRINT_LOSS,
+                             NeuralNetwork.GRAPH_LOSS,])
+
+# Get predictions for every possible input
+correct_predictions = 0
+predictions = nnet.predict(X)
+for i in range(predictions.shape[0]):
+    if predictions[i] == y[i]:
+        correct_predictions += 1
+    else:
+        print('Incorrect prediction: x=%s, y=%d (should be %d)' % (X[i], predictions[i], y[i]))
+
+print('Correctly predicting %d%% of instances' % (correct_predictions*100/binary_num_instances))
