@@ -2,7 +2,180 @@ import math
 import matplotlib.pyplot as plt
 import numpy as np
 
+class NeuralNetworkMonitor():
+    '''
+    Used to monitor the training progress of a neural network.
+    '''
+
+    def __init__(self, nnet, monitoring_flags, epochs, monitoring_resolution,
+                 train_X, train_y, val_X, val_y):
+        self.nnet = nnet
+
+        self.print_t_loss = NeuralNetwork.PRINT_TRAIN_LOSS in monitoring_flags
+        self.print_v_loss = NeuralNetwork.PRINT_VALIDATION_LOSS in monitoring_flags
+        self.print_t_acc = NeuralNetwork.PRINT_TRAIN_ACCURACY in monitoring_flags
+        self.print_v_acc = NeuralNetwork.PRINT_VALIDATION_ACCURACY in monitoring_flags
+        self.graph_t_loss = NeuralNetwork.GRAPH_TRAIN_LOSS in monitoring_flags
+        self.graph_v_loss = NeuralNetwork.GRAPH_VALIDATION_LOSS in monitoring_flags
+        self.graph_t_acc = NeuralNetwork.GRAPH_TRAIN_ACCURACY in monitoring_flags
+        self.graph_v_acc = NeuralNetwork.GRAPH_VALIDATION_ACCURACY in monitoring_flags
+
+        self.displaying_graph = (self.graph_t_loss or self.graph_v_loss or
+                                 self.graph_t_acc or self.graph_v_acc)
+        self.monitoring_accuracy = (self.print_t_acc or self.print_v_acc or
+                                      self.graph_t_acc or self.graph_v_acc)
+        self.monitoring_validation = (self.print_v_loss or self.graph_v_loss or
+                                      self.print_v_acc or self.graph_v_acc)
+
+        self.epochs_per_monitor = epochs//monitoring_resolution
+
+        self.train_X = train_X
+        self.train_y = train_y
+        self.val_X = val_X
+        self.val_y = val_y
+
+        if (nnet.learning_task == NeuralNetwork.REGRESSION and
+            self.monitoring_accuracy):
+            raise ValueError('Cannot monitor accuracy in a regression')
+
+        if (self.monitoring_validation and (val_X is None or val_y is None)):
+            raise ValueError('Attempting to monitor validation loss with no '
+                             'validation instances')
+
+        self.loss_axes = None
+        self.acc_axes = None
+        self.t_loss_plotline = None
+        self.v_loss_plotline = None
+        self.t_acc_plotline = None
+        self.v_acc_plotline = None
+
+        if ((self.graph_t_loss or self.graph_v_loss) and
+            (self.graph_t_acc or self.graph_v_acc)):
+            # Graphing both loss and accuracy
+            fig, (self.loss_axes, self.acc_axes) = plt.subplots(2, 1)
+        elif self.graph_t_loss or self.graph_v_loss:
+            # Graphing loss
+            fig, self.loss_axes = plt.subplots(1, 1)
+        elif self.graph_t_acc or self.graph_v_acc:
+            # Graphing accuracy
+            fig, self.loss_axes = plt.subplots(1, 1)
+
+        if self.loss_axes is not None:
+            self.loss_axes.set_xlim([0, epochs])
+            self.loss_axes.set_title("Loss per Epoch")
+            self.loss_axes.set_xlabel("Epoch")
+            self.loss_axes.set_ylabel("Loss")
+            self.loss_axes.legend()
+            self.loss_axes.grid()
+        if self.acc_axes is not None:
+            self.acc_axes.set_xlim([0, epochs])
+            self.acc_axes.set_ylim([-5, 105])
+            self.acc_axes.set_title("Accuracy per Epoch")
+            self.acc_axes.set_xlabel("Epoch")
+            self.acc_axes.set_ylabel("Accuracy (%)")
+            self.acc_axes.legend()
+            self.acc_axes.grid()
+
+        if self.graph_t_loss:
+            self.t_loss_plotline, = self.loss_axes.plot([], [], 'r-',
+                                                        label='Training loss')
+        if self.graph_v_loss:
+            self.v_loss_plotline, = self.loss_axes.plot([], [], 'b-',
+                                                        label='Validation loss')
+        if self.graph_t_acc:
+            self.t_acc_plotline, = self.acc_axes.plot([], [], 'r-',
+                                                      label='Training accuracy')
+        if self.graph_v_acc:
+            self.v_acc_plotline, = self.acc_axes.plot([], [], 'b-',
+                                                      label='Validation accuracy')
+
+        if self.displaying_graph:
+            plt.ion()
+            plt.legend()
+            plt.show()
+
+
+    def output(self, epoch):
+        if self.epochs_per_monitor <= 0 or epoch % self.epochs_per_monitor != 0:
+            return
+
+        t_scores = None
+        t_loss = None
+        t_acc = None
+        v_scores = None
+        v_loss = None
+        v_acc = None
+        if (self.print_t_loss or self.graph_t_loss or
+            self.print_t_acc or self.graph_t_acc):
+            t_scores, _ = self.nnet._calculate_scores(self.train_X)
+        if (self.print_v_loss or self.graph_v_loss or
+            self.print_v_acc or self.graph_v_acc):
+            v_scores, _ = self.nnet._calculate_scores(self.val_X)
+
+        if self.print_t_loss or self.graph_t_loss:
+            t_loss, _ = self.nnet._loss(t_scores, self.train_y)
+        if self.print_v_loss or self.graph_v_loss:
+            v_loss, _ = self.nnet._loss(v_scores, self.val_y)
+        if self.print_t_acc or self.graph_t_acc:
+            t_predictions = self.nnet._scores_to_predictions(t_scores)
+            t_acc = self.nnet._calculate_accuracy(t_predictions, self.train_y)
+        if self.print_v_acc or self.graph_v_acc:
+            v_predictions = self.nnet._scores_to_predictions(v_scores)
+            v_acc = self.nnet._calculate_accuracy(v_predictions, self.val_y)
+
+        # Print and graph data
+        if self.print_t_loss:
+            print('Training loss for epoch %d: %g' % (
+                    epoch, t_loss))
+        if self.print_v_loss:
+            print('Validation loss for epoch %d: %g' % (
+                    epoch, v_loss))
+        if self.print_t_acc:
+            print('Training accuracy for epoch %d: %g' % (
+                    epoch, t_acc))
+        if self.print_v_acc:
+            print('Validation accuracy for epoch %d: %g' % (
+                    epoch, v_acc))
+
+        if self.graph_t_loss:
+            self._add_to_plotline(self.t_loss_plotline, t_loss, epoch)
+
+        if self.graph_v_loss:
+            self._add_to_plotline(self.v_loss_plotline, v_loss, epoch)
+
+        if self.graph_t_acc:
+            self._add_to_plotline(self.t_acc_plotline, t_acc, epoch)
+
+        if self.graph_v_acc:
+            self._add_to_plotline(self.v_acc_plotline, v_acc, epoch)
+
+        if self.displaying_graph:
+            self.loss_axes.relim()
+            self.loss_axes.autoscale_view()
+            plt.draw()
+            plt.pause(0.00000001)
+
+
+    def _add_to_plotline(self, plotline, data, epoch):
+        plotline.set_xdata(
+            np.append(plotline.get_xdata(), epoch)
+        )
+        plotline.set_ydata(
+            np.append(plotline.get_ydata(), data)
+        )
+
+
+    # Ensures a graph stays visible after training finishes
+    def finish(self):
+        if self.displaying_graph:
+            plt.ioff()
+            plt.show()
+
+
 class NeuralNetwork():
+    '''
+    A highly customizable neural network.
+    '''
 
     # Activation functions
     RELU = 0
@@ -29,10 +202,19 @@ class NeuralNetwork():
     NESTEROV_MOMENTUM = 2
 
     # Monitoring flags
-    PRINT_LOSS = 0
-    PRINT_VAL_LOSS = 1
-    GRAPH_LOSS = 2
-    GRAPH_VAL_LOSS = 3
+    PRINT_TRAIN_LOSS = 0
+    PRINT_VALIDATION_LOSS = 1
+    PRINT_TRAIN_ACCURACY = 2
+    PRINT_VALIDATION_ACCURACY = 3
+    GRAPH_TRAIN_LOSS = 4
+    GRAPH_VALIDATION_LOSS = 5
+    GRAPH_TRAIN_ACCURACY = 6
+    GRAPH_VALIDATION_ACCURACY = 7
+
+    MONITOR_ALL = [PRINT_TRAIN_LOSS, PRINT_VALIDATION_LOSS,
+                   PRINT_TRAIN_ACCURACY, PRINT_VALIDATION_ACCURACY,
+                   GRAPH_TRAIN_LOSS, GRAPH_VALIDATION_LOSS,
+                   GRAPH_TRAIN_ACCURACY, GRAPH_VALIDATION_ACCURACY]
 
     def __init__(self, layer_sizes,
                  activation=RELU,
@@ -62,7 +244,8 @@ class NeuralNetwork():
         for input_size, output_size in zip(layer_sizes[:-1], layer_sizes[1:]):
             self.W.append(
                 # Recommended initialization distribution
-                np.random.randn(input_size, output_size) / init_denom(input_size)
+                np.random.randn(input_size, output_size) /
+                init_denom(input_size)
             )
             self.dW.append(np.zeros((input_size, output_size)))
 
@@ -213,33 +396,11 @@ class NeuralNetwork():
               monitoring_resolution=100):
         num_instances = X.shape[0]
 
-        graph_loss = NeuralNetwork.GRAPH_LOSS in monitoring_flags
-        graph_val_loss = NeuralNetwork.GRAPH_VAL_LOSS in monitoring_flags
-        print_loss = NeuralNetwork.PRINT_LOSS in monitoring_flags
-        print_val_loss = NeuralNetwork.PRINT_VAL_LOSS in monitoring_flags
-
-        loss_plotline = None
-        val_loss_plotline = None
-
-        if ((graph_val_loss or print_val_loss) and
-           (val_X is None or val_y is None)):
-            raise ValueError('Attempting to monitor validation loss with no '
-                             'validation instances')
-
-        if graph_loss:
-            loss_plotline,  = plt.plot([], [], 'r-', label='Training loss')
-        if graph_val_loss:
-            val_loss_plotline, = plt.plot([], [], 'b-', label='Validation loss')
-
-        if graph_loss or graph_val_loss:
-            plt.ion()
-            plt.xlim([0, epochs])
-            plt.title("Loss per Epoch")
-            plt.xlabel("Epoch")
-            plt.ylabel("Loss")
-            plt.legend()
-            plt.grid()
-            plt.show()
+        # Initialise monitoring
+        monitor = NeuralNetworkMonitor(self, monitoring_flags,
+                                       epochs, monitoring_resolution,
+                                       X, y,
+                                       val_X, val_y)
 
         if (self.learning_task == NeuralNetwork.ATTRIBUTE_CLASSIFICATION and
                      self.loss == NeuralNetwork.HINGE):
@@ -263,17 +424,23 @@ class NeuralNetwork():
                     build_by = (1 - self.momentum) * self.momentum_build
                     self.momentum += build_by
 
-            for batch in range(num_instances//batch_size):
-                # Sample a batch of size batch_size
-                if batch_size == num_instances:
-                    X_batch = X
-                    y_batch = y
-                else:
-                    sample = np.random.choice(num_instances, batch_size,
-                                              replace=False)
-                    X_batch = X[sample, :]
-                    y_batch = y[sample]
+            # Ask monitor to output current values
+            monitor.output(epoch)
 
+            if batch_size == num_instances:
+                batches = [(X, y)]
+            else:
+                indices = np.arange(num_instances)
+                np.random.shuffle(indices)
+
+                indices = np.array_split(indices, num_instances//batch_size)
+
+                batches = []
+                for i in indices:
+                    batches.append((X[i], y[i]))
+
+            # Train for each batch
+            for X_batch, y_batch in batches:
                 # Feed through network to calculate scores
                 scores, last_layer_output = self._calculate_scores(
                         X_batch,
@@ -281,44 +448,6 @@ class NeuralNetwork():
                         cache_results=True
                 )
                 loss, dscores = self._loss(scores, y_batch)
-
-                val_loss = None
-                if print_val_loss or graph_val_loss:
-                    # Calculate the validation set loss
-                    val_scores, _ = self._calculate_scores(val_X)
-                    val_loss, _ = self._loss(val_scores, val_y)
-
-                if epoch % (epochs//monitoring_resolution) == 0:
-                    # Print and graph loss and validation loss
-                    if print_loss:
-                        print('Training loss for epoch %d, batch %d: %g' % (
-                                epoch, batch, loss))
-                    if print_val_loss:
-                        print('Validation loss for epoch %d, batch %d: %g' % (
-                                epoch, batch, val_loss))
-
-                    if graph_loss:
-                        loss_plotline.set_xdata(
-                            np.append(loss_plotline.get_xdata(), epoch)
-                        )
-                        loss_plotline.set_ydata(
-                            np.append(loss_plotline.get_ydata(), loss)
-                        )
-
-                    if graph_val_loss:
-                        val_loss_plotline.set_xdata(
-                            np.append(val_loss_plotline.get_xdata(), epoch)
-                        )
-                        val_loss_plotline.set_ydata(
-                            np.append(val_loss_plotline.get_ydata(), val_loss)
-                        )
-
-                    if graph_loss or graph_val_loss:
-                        ax = plt.gca()
-                        ax.relim()
-                        ax.autoscale_view()
-                        plt.draw()
-                        plt.pause(0.00000001)
 
                 # Back propagate from the output layer
                 dWoutput = np.dot(last_layer_output.T, dscores)
@@ -352,9 +481,7 @@ class NeuralNetwork():
                 # Update weights
                 self._update_weights()
 
-        if graph_loss or graph_val_loss:
-            plt.ioff()
-            plt.show()
+        monitor.finish()
 
 
     # Feeds forward through the network to calculate the scores for some input
@@ -386,6 +513,12 @@ class NeuralNetwork():
         return scores, layer_output
 
 
+    # Calculates a percentage of how many predictions were correct
+    def _calculate_accuracy(self, predictions, y):
+        num_incorrect = np.sum(np.sign(np.sum(np.abs(predictions - y), axis=1)))
+        return 100 - 100*num_incorrect/y.shape[0]
+
+
     # Updates weights with gradients calculated in training
     def _update_weights(self):
         for layer in range(len(self.W)):
@@ -393,6 +526,7 @@ class NeuralNetwork():
                 self.W[layer] -= self.learning_rate * self.dW[layer]
                 self.b[layer] -= self.learning_rate * self.db[layer]
             elif self.param_update_method == NeuralNetwork.MOMENTUM:
+                # Update W
                 W = self.W[layer]
                 dW = self.dW[layer]
                 Wv = self.Wv[layer]
@@ -402,6 +536,7 @@ class NeuralNetwork():
 
                 self.Wv[layer] = Wv
 
+                # Update b
                 b = self.b[layer]
                 db = self.db[layer]
                 bv = self.bv[layer]
@@ -411,6 +546,7 @@ class NeuralNetwork():
 
                 self.bv[layer] = bv
             elif self.param_update_method == NeuralNetwork.NESTEROV_MOMENTUM:
+                # Update W
                 W = self.W[layer]
                 dW = self.dW[layer]
                 Wv = self.Wv[layer]
@@ -421,6 +557,7 @@ class NeuralNetwork():
 
                 self.Wv[layer] = Wv
 
+                # Update b
                 b = self.b[layer]
                 db = self.db[layer]
                 bv = self.bv[layer]
@@ -449,20 +586,24 @@ class NeuralNetwork():
     #   the 4th test instance is predicted to be 0.49
     def predict(self, X):
         scores, _ = self._calculate_scores(X)
+        return self._scores_to_predictions(scores)
 
-        prediction = None
+
+    # Converts a series of scores to a series of predictions
+    def _scores_to_predictions(self, S):
+        predictions = None
 
         if self.learning_task == NeuralNetwork.CLASSIFICATION:
-            prediction = np.argmax(scores, axis=1)
+            predictions = np.argmax(S, axis=1).reshape(S.shape[0], 1)
         elif self.learning_task == NeuralNetwork.ATTRIBUTE_CLASSIFICATION:
             # Assume non-classification on 0 score
-            scores[scores == 0] = -1
+            S[S == 0] = -1
             # Turn a matrix of negatives and positives into a matrix of
             # 0s and 1s
-            prediction = (np.sign(scores) + 1)/2
+            predictions = (np.sign(S) + 1)/2
         elif self.learning_task == NeuralNetwork.REGRESSION:
-            prediction = scores
-        return prediction
+            predictions = S
+        return predictions
 
 
     # Averages all data losses and combines them with the regularization losses
@@ -480,10 +621,10 @@ class NeuralNetwork():
         probs = np.exp(S)/np.sum(np.exp(S), axis=1, keepdims=True)
 
         neg_log_probs = -np.log(probs)
-        result = neg_log_probs[range(S.shape[0]), y]
+        result = neg_log_probs[range(S.shape[0]), y.T]
 
         num_instances = probs.shape[0]
-        probs[range(num_instances), y] -= 1
+        probs[range(num_instances), y.T] -= 1
 
         return result, probs/num_instances
 
@@ -500,11 +641,11 @@ class NeuralNetwork():
     def _hinge_loss(self, S, y):
         num_instances = S.shape[0]
         margins = np.maximum(0,
-            S - S[range(num_instances), y].reshape(num_instances, 1) + 1)
-        margins[range(margins.shape[0]),y] = 0
+            S - S[range(num_instances), y.T].T + 1)
+        margins[range(margins.shape[0]), y.T] = 0
 
         dS = np.sign(margins)
-        dS[range(dS.shape[0]), y] = -np.sum(dS, axis=1)
+        dS[range(dS.shape[0]), y.T] = -np.sum(dS, axis=1)
 
         return np.sum(margins, axis=1), dS
 
@@ -519,7 +660,7 @@ class NeuralNetwork():
     # The squared error loss function, also calculates dloss/dscores
     def _squared_error_loss(self, S, y):
         diffs = S - y.reshape(y.shape[0], 1)
-        return np.sum(diffs**2, axis=1)**2, 2*diffs
+        return np.sum(diffs**2, axis=1), 2*diffs
 
 
     # The L2 regularization function
@@ -589,183 +730,3 @@ class NeuralNetwork():
         result[result <= 0] = 0
         result[result > 0] = 1
         return result
-
-
-
-#####
-# This section tests the implementation on a few example data sets
-#####
-
-import itertools
-
-autompg_data = []
-discrete_attribute_values = {
-    0 : [3, 4, 5, 6, 8],
-    5 : [70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82],
-    6 : [1, 2, 3]
-}
-
-# Training on autoMpg
-with open('autoMpgData.csv') as f:
-    for line in f:
-        if '?' in line:
-            # Skip instances with missing attributes
-            continue
-        attributes = list(map(float, line.strip().split(',')))
-        autompg_data.append(attributes)
-
-autompg_num_inputs = len(autompg_data[0]) - 1 - len(discrete_attribute_values) + sum(map(len, discrete_attribute_values.values()))
-autompg_num_instances = len(autompg_data)
-autompg_test_split = 0.1
-autompg_num_test_instances = int(autompg_num_instances*autompg_test_split)
-autompg_validation_split = 0.1
-autompg_num_validation_instances = int((autompg_num_instances-autompg_num_test_instances)*autompg_validation_split)
-
-# Gather the data
-X = np.zeros((autompg_num_instances, autompg_num_inputs))
-y = np.zeros(autompg_num_instances)
-for i, instance in enumerate(autompg_data):
-    converted_attributes = []
-
-    # Convert class attributes into indicator attributes
-    for j, attribute in enumerate(instance):
-        if j in discrete_attribute_values:
-            attribute = int(attribute)
-            converted_attributes += [int(x == attribute) for x in discrete_attribute_values[j]]
-        else:
-            converted_attributes.append(attribute)
-
-    print(converted_attributes)
-    X[i] = converted_attributes[:-1]
-    y[i] = converted_attributes[-1]
-
-# Zero-center data
-X -= np.mean(X, axis=0)
-# Normalize data
-X /= np.std(X, axis=0)
-
-# Split into train, validation and test instances
-indices = np.random.permutation(autompg_num_instances)
-test_indices = indices[:autompg_num_test_instances]
-rest_indices = indices[autompg_num_test_instances:]
-validation_indices = rest_indices[:autompg_num_validation_instances]
-train_indices = rest_indices[autompg_num_validation_instances:]
-train_X, val_X, test_X = X[train_indices,:], X[validation_indices,:], X[test_indices,:]
-train_y, val_y, test_y = y[train_indices], y[validation_indices], y[test_indices]
-
-# Train a linear regression
-nnet = NeuralNetwork(layer_sizes=[autompg_num_inputs, 1],
-                     dropout_prob=1,
-                     loss=NeuralNetwork.SQUARED_ERROR,
-                     learning_task=NeuralNetwork.REGRESSION,
-                     reg_strength=0.01,
-                     learning_rate=0.0000001,
-                     learning_rate_decay=0.0,
-                     learning_rate_epochs_per_decay=500)
-
-nnet.train(train_X, train_y, 10000,
-           monitoring_flags=[NeuralNetwork.PRINT_LOSS,
-                             NeuralNetwork.GRAPH_LOSS,
-                             NeuralNetwork.PRINT_VAL_LOSS,
-                             NeuralNetwork.GRAPH_VAL_LOSS],
-           val_X=val_X, val_y=val_y)
-
-# Calculate the error on the test data
-squared_error = 0
-predictions = nnet.predict(test_X)
-for i in range(predictions.shape[0]):
-    #print('Prediction for x=%s: y=%f (should be %f)' % (test_X[i], predictions[i], test_y[i]))
-    squared_error += (predictions[i] - test_y[i])**2
-
-print('Average squared error: %f' % (squared_error/autompg_num_test_instances))
-
-# Train a neural net
-nnet = NeuralNetwork(layer_sizes=[autompg_num_inputs, 100, 1],
-                     dropout_prob=1,
-                     loss=NeuralNetwork.SQUARED_ERROR,
-                     learning_task=NeuralNetwork.REGRESSION,
-                     reg_strength=0.001,
-                     learning_rate=0.00000001,
-                     learning_rate_decay=0.0,
-                     learning_rate_epochs_per_decay=500)
-
-nnet.train(train_X, train_y, 10000,
-           monitoring_flags=[NeuralNetwork.PRINT_LOSS,
-                             NeuralNetwork.GRAPH_LOSS,
-                             NeuralNetwork.PRINT_VAL_LOSS,
-                             NeuralNetwork.GRAPH_VAL_LOSS],
-           val_X=val_X, val_y=val_y)
-
-# Calculate the error on the test data
-squared_error = 0
-predictions = nnet.predict(test_X)
-for i in range(predictions.shape[0]):
-    #print('Prediction for x=%s: y=%f (should be %f)' % (test_X[i], predictions[i], test_y[i]))
-    squared_error += (predictions[i] - test_y[i])**2
-
-print('Average squared error: %f' % (squared_error/autompg_num_test_instances))
-
-
-# Training on binary function
-binary_num_inputs = 8
-binary_num_instances = 2**binary_num_inputs
-binary_num_classes = 2
-
-X = np.zeros((binary_num_instances, binary_num_inputs), dtype='int8')
-y = np.zeros(binary_num_instances, dtype='int8')
-
-for i, product in enumerate(itertools.product('01', repeat=binary_num_inputs)):
-    for j, bit in enumerate(product):
-        X[i, j] = int(bit)
-    #y[i] = X[i, 0] & X[i, 1] & X[i, 2] & X[i, 3] & X[i, 4] & X[i, 5] & X[i, 6] & X[i, 7]
-    y[i] = X[i, 0] ^ X[i, 1] ^ X[i, 2] ^ X[i, 3] ^ X[i, 4] ^ X[i, 5] ^ X[i, 6] ^ X[i, 7]
-
-# Train a linear classifier
-nnet = NeuralNetwork(layer_sizes=[binary_num_inputs, binary_num_classes],
-                     dropout_prob=1,
-                     loss=NeuralNetwork.HINGE,
-                     learning_task=NeuralNetwork.CLASSIFICATION,
-                     reg_strength=0,
-                     learning_rate=0.000001,
-                     learning_rate_decay=0.0,
-                     learning_rate_epochs_per_decay=500)
-
-nnet.train(X, y, 10000,
-           monitoring_flags=[NeuralNetwork.PRINT_LOSS,
-                             NeuralNetwork.GRAPH_LOSS,])
-
-# Get predictions for every possible input
-correct_predictions = 0
-predictions = nnet.predict(X)
-for i in range(predictions.shape[0]):
-    if predictions[i] == y[i]:
-        correct_predictions += 1
-    else:
-        print('Incorrect prediction: x=%s, y=%d (should be %d)' % (X[i], predictions[i], y[i]))
-
-print('Correctly predicting %d%% of instances' % (correct_predictions*100/binary_num_instances))
-
-# Train a neural net classifier
-nnet = NeuralNetwork(layer_sizes=[binary_num_inputs, 100, binary_num_classes],
-                     dropout_prob=1,
-                     loss=NeuralNetwork.HINGE,
-                     learning_task=NeuralNetwork.CLASSIFICATION,
-                     reg_strength=0,
-                     learning_rate=0.0001,
-                     learning_rate_decay=0.0,
-                     learning_rate_epochs_per_decay=500)
-
-nnet.train(X, y, 2000,
-           monitoring_flags=[NeuralNetwork.PRINT_LOSS,
-                             NeuralNetwork.GRAPH_LOSS,])
-
-# Get predictions for every possible input
-correct_predictions = 0
-predictions = nnet.predict(X)
-for i in range(predictions.shape[0]):
-    if predictions[i] == y[i]:
-        correct_predictions += 1
-    else:
-        print('Incorrect prediction: x=%s, y=%d (should be %d)' % (X[i], predictions[i], y[i]))
-
-print('Correctly predicting %d%% of instances' % (correct_predictions*100/binary_num_instances))
